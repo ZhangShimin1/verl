@@ -6,7 +6,7 @@ WANDB_API_KEY=08a89b323e88ce77e62a3490c699f8907670def8
 # export VLLM_USE_V1=1
 
 project_name='Qwen2.5-7B'
-exp_name='clipcov'
+exp_name='grpo'
 
 adv_estimator=grpo
 
@@ -28,7 +28,7 @@ overlong_buffer_len=$((1024 * 2))
 overlong_penalty_factor=1.0
 
 loss_agg_mode="token-mean"
-loss_mode="clip_cov"
+loss_mode="vanilla"
 enable_filter_groups=True
 filter_groups_metric=acc
 max_num_gen_batches=10
@@ -50,7 +50,7 @@ aime_val=$HOME/data/dapo_math_17k/aime-2024.parquet
 math_val=$HOME/data/math/test.parquet
 RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
 MODEL_PATH=${MODEL_PATH:-"Qwen/Qwen2.5-7B"}
-CKPTS_DIR=${CKPTS_DIR:-"${HOME}/ckpts"}
+CKPTS_DIR=${CKPTS_DIR:-"${HOME}/checkpoints/grpo_vanilla"}
 TRAIN_FILE="['$dapo_math_17k_train']"
 TEST_FILE="['$aime_val','$math_val']"
 
@@ -147,4 +147,4 @@ HYDRA_FULL_ERROR=1 python -m recipe.entropy.main_entropy \
     trainer.save_freq=32 \
     trainer.total_epochs=1000 \
     trainer.default_local_dir="${CKPTS_DIR}" \
-    trainer.resume_mode=auto
+    trainer.resume_mode=disable

@@ -14,7 +14,8 @@
 """
 Note that we don't combine the main with ray_trainer as ray_trainer is used by other main.
 """
-
+import os
+os.environ["RAY_memory_monitor_refresh_ms"] = "0"  # OOM
 import hydra
 import ray
 
@@ -35,8 +36,7 @@ def run_ppo(config) -> None:
                 "env_vars": {
                     "TOKENIZERS_PARALLELISM": "true",
                     "NCCL_DEBUG": "WARN",
-                    "VLLM_LOGGING_LEVEL": "WARN",
-                    "WANDB_API_KEY": "YOUR_WANDB_API_KEY",
+                    "VLLM_LOGGING_LEVEL": "WARN"
                 }
             },
             num_cpus=config.ray_init.num_cpus,
