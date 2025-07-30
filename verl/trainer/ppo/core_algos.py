@@ -308,7 +308,7 @@ def compute_grpo_outcome_advantage(
         dc = DistCalculator(dist_type="js")
         id2dynamics = dc.compute_loo_disperse(id2dynamics)
 
-
+ 
         for i in range(bsz):
             if norm_adv_by_std_in_grpo:
                 scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)

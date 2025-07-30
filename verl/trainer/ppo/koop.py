@@ -330,7 +330,6 @@ class DistCalculator:
     def compute_loo_disperse(self, spectrums: dict):  # {key1: [b1_r1, b1_r2, ..., b1_r6], key2: [b2_r1, b2_r2, ..., b2_r6], ...}
         one_batch_dispersive_rewards = {}
         for key, value in spectrums.items():
-            # print(key, len(value))
             one_question_loo_dispersive_rewards = []
             for i in range(len(value)):
                 leave_one_total_distance = 0.0
