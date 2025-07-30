@@ -287,6 +287,8 @@ def compute_grpo_outcome_advantage(
     id2std = {}
 
     id2dynamics = defaultdict(list)
+    id2mean_dynamics = {}
+    id2std_dynamics = {}
 
     with torch.no_grad():
         bsz = scores.shape[0]
@@ -303,23 +305,31 @@ def compute_grpo_outcome_advantage(
                 id2std[idx] = torch.std(torch.tensor([id2score[idx]]))
             else:
                 raise ValueError(f"no score in prompt index: {idx}")
-        
+
         from verl.trainer.ppo.koop import DistCalculator
         dc = DistCalculator(dist_type="js")
         id2dynamics = dc.compute_loo_disperse(id2dynamics)
 
+        for idx in id2dynamics:
+            id2mean_dynamics[idx] = torch.mean(torch.tensor(id2dynamics[idx]))
+            id2std_dynamics[idx] = torch.std(torch.tensor(id2dynamics[idx]))
  
         for i in range(bsz):
             if norm_adv_by_std_in_grpo:
                 scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
-                # diversity = (id2dynamics[index[i]] - id2dynamics_mean[index[i]]) / (id2dynamics_std[index[i]] + epsilon)
             else:
                 scores[i] = scores[i] - id2mean[index[i]]
-                # diversity = id2dynamics[index[i]] - id2dynamics_mean[index[i]]
-            diversity = id2dynamics[index[i]].pop()
-            clipped_diversity = min(0.4 * diversity, math.fabs(scores[i]) / 2.0)  # Reasoning with Exploration: An Entropy Perspective
-            scores[i] = scores[i] + clipped_diversity
-        print("scores before masking >>>>>>> \n", scores)
+
+            # # Vanilla Score + Diversity
+            # diversity = id2dynamics[index[i]].pop()
+            # clipped_diversity = min(0.4 * diversity, math.fabs(scores[i]) / 2.0)  # Reasoning with Exploration: An Entropy Perspective
+            # scores[i] = scores[i] + clipped_diversity
+
+            # Vanilla Score * Diversity
+            diversity = id2dynamics[index[i]].pop() 
+            norm_diversity = (diversity - id2mean_dynamics[index[i]]) / (id2std_dynamics[index[i]] + epsilon)
+            scores[i] = scores[i] * norm_diversity
+
         scores = scores.unsqueeze(-1) * response_mask
         print("Advantage scores >>>>>>> \n", scores)
 
