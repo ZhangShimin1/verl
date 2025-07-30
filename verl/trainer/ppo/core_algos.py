@@ -26,6 +26,7 @@ from typing import Optional
 
 import numpy as np
 import torch
+import math
 
 import verl.utils.torch_functional as verl_F
 from verl.trainer.config import AlgoConfig
@@ -245,6 +246,7 @@ def compute_gae_advantage_return(
 @register_adv_est(AdvantageEstimator.GRPO)  # or simply: @register_adv_est("grpo")
 def compute_grpo_outcome_advantage(
     token_level_rewards: torch.Tensor,
+    dynamics: torch.Tensor,
     response_mask: torch.Tensor,
     index: np.ndarray,
     epsilon: float = 1e-6,
@@ -280,15 +282,18 @@ def compute_grpo_outcome_advantage(
             shape is (bs, response_length)
     """
     scores = token_level_rewards.sum(dim=-1)
-
     id2score = defaultdict(list)
     id2mean = {}
     id2std = {}
+
+    id2dynamics = defaultdict(list)
 
     with torch.no_grad():
         bsz = scores.shape[0]
         for i in range(bsz):
             id2score[index[i]].append(scores[i])
+            id2dynamics[index[i]].append(dynamics[i])
+
         for idx in id2score:
             if len(id2score[idx]) == 1:
                 id2mean[idx] = torch.tensor(0.0)
@@ -298,12 +303,25 @@ def compute_grpo_outcome_advantage(
                 id2std[idx] = torch.std(torch.tensor([id2score[idx]]))
             else:
                 raise ValueError(f"no score in prompt index: {idx}")
+        
+        from verl.trainer.ppo.koop import DistCalculator
+        dc = DistCalculator(dist_type="js")
+        id2dynamics = dc.compute_loo_disperse(id2dynamics)
+
+
         for i in range(bsz):
             if norm_adv_by_std_in_grpo:
                 scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
+                # diversity = (id2dynamics[index[i]] - id2dynamics_mean[index[i]]) / (id2dynamics_std[index[i]] + epsilon)
             else:
                 scores[i] = scores[i] - id2mean[index[i]]
+                # diversity = id2dynamics[index[i]] - id2dynamics_mean[index[i]]
+            diversity = id2dynamics[index[i]].pop()
+            clipped_diversity = min(0.4 * diversity, math.fabs(scores[i]) / 2.0)  # Reasoning with Exploration: An Entropy Perspective
+            scores[i] = scores[i] + clipped_diversity
+        print("scores before masking >>>>>>> \n", scores)
         scores = scores.unsqueeze(-1) * response_mask
+        print("Advantage scores >>>>>>> \n", scores)
 
     return scores, scores
 
