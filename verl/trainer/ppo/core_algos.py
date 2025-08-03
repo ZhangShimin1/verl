@@ -251,7 +251,7 @@ def compute_grpo_outcome_advantage(
     index: np.ndarray,
     epsilon: float = 1e-6,
     norm_adv_by_std_in_grpo: bool = True,
-    config: Optional[AlgoConfig] = None,
+    config: str = "baseline",
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Compute advantage for GRPO, operating only on Outcome reward
@@ -281,6 +281,7 @@ def compute_grpo_outcome_advantage(
         Returns: `(torch.Tensor)`
             shape is (bs, response_length)
     """
+    print(f"grpo with {config} advantage type.....")
     scores = token_level_rewards.sum(dim=-1)
     id2score = defaultdict(list)
     id2mean = {}
@@ -315,23 +316,25 @@ def compute_grpo_outcome_advantage(
             id2std_dynamics[idx] = torch.std(torch.tensor(id2dynamics[idx]))
  
         for i in range(bsz):
+            correct = scores[i]
             if norm_adv_by_std_in_grpo:
                 scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
             else:
                 scores[i] = scores[i] - id2mean[index[i]]
 
-            # # Vanilla Score + Diversity
-            # diversity = id2dynamics[index[i]].pop()
-            # clipped_diversity = min(0.4 * diversity, math.fabs(scores[i]) / 2.0)  # Reasoning with Exploration: An Entropy Perspective
-            # scores[i] = scores[i] + clipped_diversity
-
-            # Vanilla Score * Diversity
-            diversity = id2dynamics[index[i]].pop() 
-            norm_diversity = (diversity - id2mean_dynamics[index[i]]) / (id2std_dynamics[index[i]] + epsilon)
-            scores[i] = scores[i] * norm_diversity
+            if config == "baseline":
+                scores[i] = scores[i]
+            elif config == "general":
+                diversity = id2dynamics[index[i]].pop()
+                if correct == 1.0:
+                    clipped_diversity = min(diversity, math.fabs(scores[i]))
+                    scores[i] = scores[i] + clipped_diversity
+                else:
+                    scores[i] = scores[i]
+                
+                # print(f"action [{i}]: obtain {s} answer with diversity {clipped_diversity} and final advantage {scores[i]}")
 
         scores = scores.unsqueeze(-1) * response_mask
-        print("Advantage scores >>>>>>> \n", scores)
 
     return scores, scores
 
