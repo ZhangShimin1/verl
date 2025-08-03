@@ -10,7 +10,7 @@ diversity_reward_type='reward_c'  # or reward_c_penalize_w
 diversity_reward_coef=1.0
 
 project_name='Qwen2.5-3B'
-exp_name='qwen2.5-3b-general-clip'
+exp_name="qwen2.5-3b-${diversity_reward_type}"
 
 use_kl_in_reward=False
 kl_coef=0.0
