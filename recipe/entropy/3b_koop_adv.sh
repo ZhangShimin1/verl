@@ -5,11 +5,12 @@ set -xeuo pipefail
 WANDB_API_KEY=08a89b323e88ce77e62a3490c699f8907670def8
 # export VLLM_USE_V1=1
 
+adv_estimator=grpo
+diversity_reward_type='reward_c'  # or reward_c_penalize_w
+diversity_reward_coef=1.0
+
 project_name='Qwen2.5-3B'
 exp_name='qwen2.5-3b-general-clip'
-
-adv_estimator=grpo
-grpo_reward_type=general
 
 use_kl_in_reward=False
 kl_coef=0.0
@@ -98,7 +99,8 @@ HYDRA_FULL_ERROR=1 python -m recipe.entropy.main_entropy \
     algorithm.filter_groups.enable=${enable_filter_groups} \
     algorithm.filter_groups.metric=${filter_groups_metric} \
     algorithm.filter_groups.max_num_gen_batches=${max_num_gen_batches} \
-    algorithm.grpo_reward_type=${grpo_reward_type} \
+    algorithm.diversity_reward.type=${diversity_reward_type} \
+    algorithm.diversity_reward.coef=${diversity_reward_coef} \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.use_dynamic_bsz=${use_dynamic_bsz} \
     actor_rollout_ref.ref.log_prob_use_dynamic_bsz=${use_dynamic_bsz} \

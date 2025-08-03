@@ -191,8 +191,10 @@ algorithm:
     # Power used for weight scaling in "pow" method
     weight_pow: 2.0
 
-  # which kind of reward used in grpo: baseline, add, mul, general
-  grpo_reward_type: baseline
+  # type and strength of diversity reward
+  diversity_reward:
+    type: baseline
+    coef: 1.0
 
 # config for the trainer
 trainer:

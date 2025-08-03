@@ -251,7 +251,7 @@ def compute_grpo_outcome_advantage(
     index: np.ndarray,
     epsilon: float = 1e-6,
     norm_adv_by_std_in_grpo: bool = True,
-    config: str = "baseline",
+    config: AlgoConfig = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Compute advantage for GRPO, operating only on Outcome reward
@@ -281,7 +281,7 @@ def compute_grpo_outcome_advantage(
         Returns: `(torch.Tensor)`
             shape is (bs, response_length)
     """
-    print(f"grpo with {config} advantage type.....")
+    print(f"grpo with {config.type} diversity reward type.....")
     scores = token_level_rewards.sum(dim=-1)
     id2score = defaultdict(list)
     id2mean = {}
@@ -322,17 +322,22 @@ def compute_grpo_outcome_advantage(
             else:
                 scores[i] = scores[i] - id2mean[index[i]]
 
-            if config == "baseline":
+            if config.type == "baseline":
                 scores[i] = scores[i]
-            elif config == "general":
+            elif config.type == "reward_c":
                 diversity = id2dynamics[index[i]].pop()
                 if correct == 1.0:
-                    clipped_diversity = min(diversity, math.fabs(scores[i]))
+                    clipped_diversity = min(diversity, math.fabs(scores[i])) * config.coef
                     scores[i] = scores[i] + clipped_diversity
                 else:
                     scores[i] = scores[i]
-                
-                # print(f"action [{i}]: obtain {s} answer with diversity {clipped_diversity} and final advantage {scores[i]}")
+            elif config.type == "reward_c_penalize_w":
+                diversity = id2dynamics[index[i]].pop()
+                clipped_diversity = min(diversity, math.fabs(scores[i])) * config.coef
+                if correct == 1.0:
+                    scores[i] = scores[i] + clipped_diversity
+                else:
+                    scores[i] = scores[i] - clipped_diversity
 
         scores = scores.unsqueeze(-1) * response_mask
 

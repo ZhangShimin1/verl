@@ -269,7 +269,7 @@ def compute_advantage(
             response_mask=grpo_calculation_mask,
             index=data.non_tensor_batch["uid"],
             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
-            config=config.grpo_reward_type,
+            config=config.diversity_reward,
         )
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
