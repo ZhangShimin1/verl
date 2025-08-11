@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -xeuo pipefail
 
-# export 
+# export
 WANDB_API_KEY=08a89b323e88ce77e62a3490c699f8907670def8
 # export VLLM_USE_V1=1
 
 adv_estimator=grpo
-diversity_reward_type='reward_c'  # or reward_c_penalize_w
+diversity_reward_type='reward_c_penalize_w_clip'
 diversity_reward_coef=1.0
 
 project_name='Qwen2.5-3B'
@@ -149,7 +149,7 @@ HYDRA_FULL_ERROR=1 python -m recipe.entropy.main_entropy \
     trainer.nnodes="${NNODES}" \
     trainer.val_before_train=False \
     trainer.test_freq=4 \
-    trainer.save_freq=32 \
+    trainer.save_freq=16 \
     trainer.total_epochs=1000 \
     trainer.default_local_dir="${CKPTS_DIR}" \
     trainer.resume_mode=auto  # auto

@@ -286,6 +286,7 @@ def compute_grpo_outcome_advantage(
     id2score = defaultdict(list)
     id2mean = {}
     id2std = {}
+    group_correct = defaultdict(list)
 
     id2dynamics = defaultdict(list)
     id2mean_dynamics = {}
@@ -294,6 +295,10 @@ def compute_grpo_outcome_advantage(
     with torch.no_grad():
         bsz = scores.shape[0]
         for i in range(bsz):
+            if scores[i] == 1.0:
+                group_correct[index[i]].append(1)
+            else:
+                group_correct[index[i]].append(0)
             id2score[index[i]].append(scores[i])
             id2dynamics[index[i]].append(dynamics[i])
 
@@ -314,9 +319,10 @@ def compute_grpo_outcome_advantage(
         for idx in id2dynamics:
             id2mean_dynamics[idx] = torch.mean(torch.tensor(id2dynamics[idx]))
             id2std_dynamics[idx] = torch.std(torch.tensor(id2dynamics[idx]))
- 
+
         for i in range(bsz):
             correct = scores[i]
+            gp_correct_counts = sum(group_correct[index[i]])
             if norm_adv_by_std_in_grpo:
                 scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
             else:
@@ -324,18 +330,51 @@ def compute_grpo_outcome_advantage(
 
             if config.type == "baseline":
                 scores[i] = scores[i]
-            elif config.type == "reward_c":
+            elif config.type == "reward_c_clip":
                 diversity = id2dynamics[index[i]].pop()
                 if correct == 1.0:
                     clipped_diversity = min(diversity, math.fabs(scores[i])) * config.coef
                     scores[i] = scores[i] + clipped_diversity
                 else:
                     scores[i] = scores[i]
-            elif config.type == "reward_c_penalize_w":
+            elif config.type == "reward_c_clip_penalize_w_clip":  # 1
                 diversity = id2dynamics[index[i]].pop()
                 clipped_diversity = min(diversity, math.fabs(scores[i])) * config.coef
                 if correct == 1.0:
                     scores[i] = scores[i] + clipped_diversity
+                else:
+                    scores[i] = scores[i] - clipped_diversity
+            elif config.type == "reward_c_penalize_w":
+                diversity = id2dynamics[index[i]].pop()
+                if correct == 1.0:
+                    scores[i] = scores[i] + diversity
+                else:
+                    scores[i] = scores[i] - diversity
+            elif config.type == "reward_gp_c_clip":
+                diversity = id2dynamics[index[i]].pop()
+                clipped_diversity = min(diversity, math.fabs(scores[i])) * config.coef
+                if correct == 1.0:
+                    if gp_correct_counts >= 20:
+                        scores[i] = scores[i]
+                    else:
+                        scores[i] = scores[i] + clipped_diversity
+                else:
+                    scores[i] = scores[i]
+            elif config.type == "reward_gp_c_penalize_w":
+                diversity = id2dynamics[index[i]].pop()
+                clipped_diversity = min(diversity, math.fabs(scores[i])) * config.coef
+                if correct == 1.0:
+                    if gp_correct_counts >= 20:
+                        scores[i] = scores[i]
+                    else:
+                        scores[i] = scores[i] + diversity
+                else:
+                    scores[i] = scores[i] - clipped_diversity
+            elif config.type == "reward_c_penalize_w_clip":
+                diversity = id2dynamics[index[i]].pop()
+                clipped_diversity = min(diversity, math.fabs(scores[i])) * config.coef
+                if correct == 1.0:
+                    scores[i] = scores[i] + diversity
                 else:
                     scores[i] = scores[i] - clipped_diversity
 
