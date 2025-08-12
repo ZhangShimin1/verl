@@ -10,7 +10,7 @@ diversity_reward_type='baseline'  # or reward_c_penalize_w
 diversity_reward_coef=1.0
 
 project_name='Qwen2.5-Math-1.5B'
-exp_name="qwen2.5-3b-${diversity_reward_type}"
+exp_name="${project_name}-${diversity_reward_type}"
 
 use_kl_in_reward=False
 kl_coef=0.0
@@ -51,7 +51,7 @@ NNODES=${NNODES:-1}
 gsm8k_train=datasets/gsm8k_long_cot/train.parquet
 gsm8k_val=datasets/gsm8k_long_cot/test.parquet
 math500_val=datasets/math500_long_cot/test.parquet
-MODEL_PATH=${MODEL_PATH:-"$HOME/models/hfmodels/Qwen2.5-Math-1.5B"}
+MODEL_PATH=${MODEL_PATH:-"$USE_YOUR_Qwen2_5_Math_1_5B_MODEL"}
 CKPTS_DIR=${CKPTS_DIR:-"./checkpoints/${exp_name}"}
 TRAIN_FILE="['$gsm8k_train']"
 TEST_FILE="['$gsm8k_val','$math500_val']"
