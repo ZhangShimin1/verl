@@ -106,6 +106,8 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> dict[str,
 
     advantages = batch.batch["advantages"]
     returns = batch.batch["returns"]
+    diversity = batch.batch["diversity"]
+    clipped_diversity = batch.batch["clipped_diversity"]
 
     max_response_length = batch.batch["responses"].shape[-1]
 
@@ -120,6 +122,8 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> dict[str,
 
     valid_adv = torch.masked_select(advantages, response_mask)
     valid_returns = torch.masked_select(returns, response_mask)
+    valid_diversity = torch.masked_select(diversity, response_mask)
+    valid_clipped_diversity = torch.masked_select(clipped_diversity, response_mask)
 
     if use_critic:
         values = batch.batch["values"]
@@ -144,6 +148,14 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> dict[str,
         "critic/returns/mean": torch.mean(valid_returns).detach().item(),
         "critic/returns/max": torch.max(valid_returns).detach().item(),
         "critic/returns/min": torch.min(valid_returns).detach().item(),
+        # diversity
+        "critic/diversity/mean": torch.mean(valid_diversity).detach().item(),
+        "critic/diversity/max": torch.max(valid_diversity).detach().item(),
+        "critic/diversity/min": torch.min(valid_diversity).detach().item(),
+        # clipped_diversity
+        "critic/clipped_diversity/mean": torch.mean(valid_clipped_diversity).detach().item(),
+        "critic/clipped_diversity/max": torch.max(valid_clipped_diversity).detach().item(),
+        "critic/clipped_diversity/min": torch.min(valid_clipped_diversity).detach().item(),
         **(
             {
                 # values

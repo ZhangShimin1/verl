@@ -282,7 +282,7 @@ def compute_grpo_outcome_advantage(
             shape is (bs, response_length)
     """
     print(f"grpo with {config.type} diversity reward type.....")
-    scores = token_level_rewards.sum(dim=-1)
+    scores: torch.Tensor = token_level_rewards.sum(dim=-1)
     id2score = defaultdict(list)
     id2mean = {}
     id2std = {}
@@ -291,6 +291,10 @@ def compute_grpo_outcome_advantage(
     id2dynamics = defaultdict(list)
     id2mean_dynamics = {}
     id2std_dynamics = {}
+    diversity_dict = {
+        "diversity": scores.clone().detach(),
+        "clipped_diversity": scores.clone().detach()
+    }
 
     with torch.no_grad():
         bsz = scores.shape[0]
@@ -323,6 +327,8 @@ def compute_grpo_outcome_advantage(
         for i in range(bsz):
             correct = scores[i]
             gp_correct_counts = sum(group_correct[index[i]])
+            diversity = 0
+            clipped_diversity = 0
             if norm_adv_by_std_in_grpo:
                 scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
             else:
@@ -377,10 +383,14 @@ def compute_grpo_outcome_advantage(
                     scores[i] = scores[i] + diversity
                 else:
                     scores[i] = scores[i] - clipped_diversity
+            diversity_dict["diversity"][i] = diversity
+            diversity_dict["clipped_diversity"][i] = clipped_diversity
 
         scores = scores.unsqueeze(-1) * response_mask
+        diversity_dict["diversity"] = diversity_dict["diversity"].unsqueeze(-1) * response_mask
+        diversity_dict["clipped_diversity"] = diversity_dict["clipped_diversity"].unsqueeze(-1) * response_mask
 
-    return scores, scores
+    return scores, scores, diversity_dict
 
 
 @register_adv_est(AdvantageEstimator.GRPO_PASSK)  # or simply: @register_adv_est("grpo_passk")
