@@ -78,7 +78,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.device_name = get_device_name()
  
     def _forward_micro_batch(
-        self, micro_batch, temperature, calculate_entropy=False
+        self, micro_batch, temperature, calculate_entropy=False, calculate_loss=False
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Returns:
@@ -250,7 +250,10 @@ class DataParallelPPOActor(BasePPOActor):
                 if calculate_entropy:
                     entropy = full_entropy.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
                     hidden_states = full_hidden_states.squeeze(-1)[:, -response_length - 1 : -1].float()  # (bsz, response_length, hid_dimension)
-                    states = hidden_states[:, 0:512, :]
+                    if calculate_loss:
+                        states = hidden_states
+                    else:
+                        states = hidden_states[:, 0:512, :].detach()
                     # truncated_hs = hidden_states[:, 0:512, :].float().detach()
                     # from verl.trainer.ppo.koop import DynamicDispersiveReward
                     # ddr = DynamicDispersiveReward(l=0, s=0, r=100, device=hidden_states.device)
@@ -446,8 +449,9 @@ class DataParallelPPOActor(BasePPOActor):
                     )
 
                     koopman_dict_matrix = torch.load("koopman_dict_matrix.pt").to(hidden_states.device)
-                    spreads = []
-                    for hs in hidden_states:
+                    div_loss = []
+                    traj_adv = advantages.mean(dim=-1)
+                    for i, hs in enumerate(hidden_states):
                         psi_x = torch.tanh(torch.matmul(hs[:-1], koopman_dict_matrix.t()))
                         psi_y = torch.tanh(torch.matmul(hs[1:], koopman_dict_matrix.t()))
                         psi_xT = psi_x.transpose(0, 1)  # [koopman_dim, seq_len-1]
@@ -458,9 +462,12 @@ class DataParallelPPOActor(BasePPOActor):
                         _, S, _ = torch.linalg.svd(K, full_matrices=False)
                         radius = torch.abs(S)
                         spread = torch.var(radius)
-                        spreads.append(spread)
-                    diversity = torch.mean(torch.stack(spreads, dim=0))
-                    mean_adv = torch.mean(advantages.mean(dim=-1))
+                        div_loss.append(spread * traj_adv[i])
+                    # diversity = torch.mean(torch.stack(spreads, dim=0))
+                    # mean_adv = torch.mean(advantages.mean(dim=-1))
+                    # div_loss = diversity * mean_adv
+                    div_loss = torch.mean(div_loss)
+
 
                     loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
 
@@ -513,7 +520,7 @@ class DataParallelPPOActor(BasePPOActor):
                         loss = policy_loss * (response_mask.shape[0] / self.config.ppo_mini_batch_size)
                     else:
                         loss = policy_loss / self.gradient_accumulation
-                    loss = loss - diversity * mean_adv
+                    loss = loss - div_loss * 0.0001
                     loss.backward()
 
                     micro_batch_metrics.update(
@@ -522,6 +529,7 @@ class DataParallelPPOActor(BasePPOActor):
                             "actor/pg_clipfrac": pg_clipfrac.detach().item(),
                             "actor/ppo_kl": ppo_kl.detach().item(),
                             "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
+                            "actor/div_loss": div_loss.detach().item(),
                         }
                     )
                     append_to_dict(metrics, micro_batch_metrics)
