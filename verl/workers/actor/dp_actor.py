@@ -102,7 +102,7 @@ class DataParallelPPOActor(BasePPOActor):
             batch_size, seqlen = input_ids.shape
             attention_mask = micro_batch["attention_mask"]
             position_ids = micro_batch["position_ids"]
-            entropy, hidden_states, dynamics = None, None, None
+            entropy, hidden_states, states = None, None, None
             if position_ids.dim() == 3:  # qwen2vl mrope
                 position_ids = position_ids.transpose(0, 1)  # (bsz, 3, seqlen) -> (3, bsz, seqlen)
 
@@ -249,13 +249,14 @@ class DataParallelPPOActor(BasePPOActor):
                 # only return response part:
                 if calculate_entropy:
                     entropy = full_entropy.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
-                    hidden_states = full_hidden_states.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length, hid_dimension)
-                    truncated_hs = hidden_states[:, 0:500, :].float().detach()
-                    from verl.trainer.ppo.koop import DynamicDispersiveReward
-                    ddr = DynamicDispersiveReward(l=10, s=1, r=25, device=hidden_states.device)
-                    koopman_spectrums = ddr.get_koopman_spectrums(truncated_hs)
-                    dynamics = torch.stack(koopman_spectrums, dim=0)
-                    # print("debug----------------koopman_spectrums>>>>>>>", dynamics.shape)
+                    hidden_states = full_hidden_states.squeeze(-1)[:, -response_length - 1 : -1].float()  # (bsz, response_length, hid_dimension)
+                    states = hidden_states[:, 0:512, :]
+                    # truncated_hs = hidden_states[:, 0:512, :].float().detach()
+                    # from verl.trainer.ppo.koop import DynamicDispersiveReward
+                    # ddr = DynamicDispersiveReward(l=0, s=0, r=100, device=hidden_states.device)
+                    # koopman_spectrums = ddr.get_koopman_spectrums(truncated_hs)
+                    # dynamics = torch.stack(koopman_spectrums, dim=0)
+                    # # print("debug----------------koopman_spectrums>>>>>>>", dynamics.shape)
                 log_probs = full_log_probs.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
                 # print("debug----------------After truncation>>>>>>>", log_probs.shape, entropy.shape if entropy is not None else None, hidden_states.shape if hidden_states is not None else None)
             else:  # not using rmpad and no ulysses sp
@@ -289,7 +290,7 @@ class DataParallelPPOActor(BasePPOActor):
                         else:
                             entropy = torch.utils.checkpoint.checkpoint(verl_F.entropy_from_logits, logits)
 
-            return entropy, log_probs, dynamics
+            return entropy, log_probs, states
 
     def _optimizer_step(self):
         assert self.config.grad_clip is not None
@@ -390,6 +391,7 @@ class DataParallelPPOActor(BasePPOActor):
             "position_ids",
             "old_log_probs",
             "advantages",
+            "spreads"
         ]
         if self.config.use_kl_loss:
             select_keys.append("ref_log_prob")
@@ -440,8 +442,25 @@ class DataParallelPPOActor(BasePPOActor):
                     if entropy_coeff != 0:
                         calculate_entropy = True
                     entropy, log_prob, hidden_states = self._forward_micro_batch(
-                        model_inputs, temperature=temperature, calculate_entropy=calculate_entropy
+                        model_inputs, temperature=temperature, calculate_entropy=True
                     )
+
+                    koopman_dict_matrix = torch.load("koopman_dict_matrix.pt").to(hidden_states.device)
+                    spreads = []
+                    for hs in hidden_states:
+                        psi_x = torch.tanh(torch.matmul(hs[:-1], koopman_dict_matrix.t()))
+                        psi_y = torch.tanh(torch.matmul(hs[1:], koopman_dict_matrix.t()))
+                        psi_xT = psi_x.transpose(0, 1)  # [koopman_dim, seq_len-1]
+                        G = torch.matmul(psi_xT, psi_x)  # [koopman_dim, koopman_dim]
+                        G_inv = torch.linalg.pinv(G)
+                        A = torch.matmul(psi_xT, psi_y)
+                        K = torch.matmul(G_inv, A)  # [koopman_dim, koopman_dim]
+                        _, S, _ = torch.linalg.svd(K, full_matrices=False)
+                        radius = torch.abs(S)
+                        spread = torch.var(radius)
+                        spreads.append(spread)
+                    diversity = torch.mean(torch.stack(spreads, dim=0))
+                    mean_adv = torch.mean(advantages.mean(dim=-1))
 
                     loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
 
@@ -494,6 +513,7 @@ class DataParallelPPOActor(BasePPOActor):
                         loss = policy_loss * (response_mask.shape[0] / self.config.ppo_mini_batch_size)
                     else:
                         loss = policy_loss / self.gradient_accumulation
+                    loss = loss - diversity * mean_adv
                     loss.backward()
 
                     micro_batch_metrics.update(

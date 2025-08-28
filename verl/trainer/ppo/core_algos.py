@@ -30,6 +30,7 @@ import math
 
 import verl.utils.torch_functional as verl_F
 from verl.trainer.config import AlgoConfig
+from verl.trainer.ppo.dynamics import koopman_learning
 
 POLICY_LOSS_REGISTRY = {}
 
@@ -281,31 +282,36 @@ def compute_grpo_outcome_advantage(
         Returns: `(torch.Tensor)`
             shape is (bs, response_length)
     """
-    print(f"grpo with {config.type} diversity reward type.....")
     scores: torch.Tensor = token_level_rewards.sum(dim=-1)
+    bsz = scores.shape[0]
+
     id2score = defaultdict(list)
     id2mean = {}
     id2std = {}
-    group_correct = defaultdict(list)
 
     id2dynamics = defaultdict(list)
     id2mean_dynamics = {}
     id2std_dynamics = {}
+
     diversity_dict = {
         "diversity": scores.clone().detach(),
-        "clipped_diversity": scores.clone().detach()
+        "spreads": scores.clone().detach()
     }
 
-    with torch.no_grad():
-        bsz = scores.shape[0]
-        for i in range(bsz):
-            if scores[i] == 1.0:
-                group_correct[index[i]].append(1)
-            else:
-                group_correct[index[i]].append(0)
-            id2score[index[i]].append(scores[i])
-            id2dynamics[index[i]].append(dynamics[i])
+    spreads = koopman_learning(dynamics, 50)
+    for i in range(bsz):
+        id2dynamics[index[i]].append(spreads[i])
+    for idx in id2dynamics:
+        rollouts_spreads = torch.stack(id2dynamics[idx])
+        id2mean_dynamics[idx] = torch.mean(rollouts_spreads).detach()
+        id2std_dynamics[idx] = torch.std(rollouts_spreads).detach()
+    for i in range(bsz):
+        spreads[i] = (spreads[i] - id2mean_dynamics[index[i]]) / (id2std_dynamics[index[i]] + epsilon)
+    diversity_dict["spreads"] = spreads  # torch.Size(bsz * n_rollouts)
 
+    with torch.no_grad():
+        for i in range(bsz):
+            id2score[index[i]].append(scores[i])
         for idx in id2score:
             if len(id2score[idx]) == 1:
                 id2mean[idx] = torch.tensor(0.0)
@@ -315,80 +321,16 @@ def compute_grpo_outcome_advantage(
                 id2std[idx] = torch.std(torch.tensor([id2score[idx]]))
             else:
                 raise ValueError(f"no score in prompt index: {idx}")
-
-        from verl.trainer.ppo.koop import DistCalculator
-        dc = DistCalculator(dist_type="js")
-        id2dynamics = dc.compute_loo_disperse(id2dynamics)
-
-        for idx in id2dynamics:
-            id2mean_dynamics[idx] = torch.mean(torch.tensor(id2dynamics[idx]))
-            id2std_dynamics[idx] = torch.std(torch.tensor(id2dynamics[idx]))
-
         for i in range(bsz):
-            correct = scores[i]
-            gp_correct_counts = sum(group_correct[index[i]])
-            diversity = 0
-            clipped_diversity = 0
             if norm_adv_by_std_in_grpo:
                 scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
             else:
                 scores[i] = scores[i] - id2mean[index[i]]
 
-            if config.type == "baseline":
-                scores[i] = scores[i]
-            elif config.type == "reward_c_clip":
-                diversity = id2dynamics[index[i]].pop()
-                if correct == 1.0:
-                    clipped_diversity = min(diversity, math.fabs(scores[i])) * config.coef
-                    scores[i] = scores[i] + clipped_diversity
-                else:
-                    scores[i] = scores[i]
-            elif config.type == "reward_c_clip_penalize_w_clip":  # 1
-                diversity = id2dynamics[index[i]].pop()
-                clipped_diversity = min(diversity, math.fabs(scores[i])) * config.coef
-                if correct == 1.0:
-                    scores[i] = scores[i] + clipped_diversity
-                else:
-                    scores[i] = scores[i] - clipped_diversity
-            elif config.type == "reward_c_penalize_w":
-                diversity = id2dynamics[index[i]].pop()
-                if correct == 1.0:
-                    scores[i] = scores[i] + diversity
-                else:
-                    scores[i] = scores[i] - diversity
-            elif config.type == "reward_gp_c_clip":
-                diversity = id2dynamics[index[i]].pop()
-                clipped_diversity = min(diversity, math.fabs(scores[i])) * config.coef
-                if correct == 1.0:
-                    if gp_correct_counts >= 20:
-                        scores[i] = scores[i]
-                    else:
-                        scores[i] = scores[i] + clipped_diversity
-                else:
-                    scores[i] = scores[i]
-            elif config.type == "reward_gp_c_penalize_w":
-                diversity = id2dynamics[index[i]].pop()
-                clipped_diversity = min(diversity, math.fabs(scores[i])) * config.coef
-                if correct == 1.0:
-                    if gp_correct_counts >= 20:
-                        scores[i] = scores[i]
-                    else:
-                        scores[i] = scores[i] + diversity
-                else:
-                    scores[i] = scores[i] - clipped_diversity
-            elif config.type == "reward_c_penalize_w_clip":
-                diversity = id2dynamics[index[i]].pop()
-                clipped_diversity = min(diversity, math.fabs(scores[i])) * config.coef
-                if correct == 1.0:
-                    scores[i] = scores[i] + diversity
-                else:
-                    scores[i] = scores[i] - clipped_diversity
-            diversity_dict["diversity"][i] = diversity
-            diversity_dict["clipped_diversity"][i] = clipped_diversity
+            diversity_dict["diversity"][i] = spreads[i]
 
         scores = scores.unsqueeze(-1) * response_mask
         diversity_dict["diversity"] = diversity_dict["diversity"].unsqueeze(-1) * response_mask
-        diversity_dict["clipped_diversity"] = diversity_dict["clipped_diversity"].unsqueeze(-1) * response_mask
 
     return scores, scores, diversity_dict
 

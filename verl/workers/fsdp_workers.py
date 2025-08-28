@@ -73,6 +73,7 @@ from verl.utils.profiler import DistProfiler, DistProfilerExtension, log_gpu_mem
 from verl.utils.profiler.performance import reduce_timing
 from verl.utils.py_functional import convert_to_regular_types
 from verl.workers.sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
+from verl.workers.dynamics import koopman_learning
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
@@ -779,10 +780,12 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data)
             with adapter_ctx:
-                output, entropys, dynamics = self.actor.compute_log_prob(data=data, calculate_entropy=True)
+                output, entropys, states = self.actor.compute_log_prob(data=data, calculate_entropy=True)
             # print("debug----------------fsdp worker>>>>>>>", output.shape, entropys.shape, dynamics.shape)  # [bsz * n_rollout, seq_len], [bsz * n_rollout, seq_len], [bsz * n_rollout, 1, 25]
+            # spreads = koopman_learning(states, 50)  # should be [bsz * n_rollout, 100]
+            # print("debug----------------spreads>>>>>>>", spreads.shape)
             output = DataProto.from_dict(
-                tensors={"old_log_probs": output, "entropys": entropys, "dynamics": dynamics},
+                tensors={"old_log_probs": output, "entropys": entropys, "dynamics": states},
                 meta_info={"temperature": self.config.rollout.temperature},
             )
             output = self.ulysses_sharding_manager.postprocess_data(output)

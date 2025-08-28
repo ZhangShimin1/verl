@@ -274,7 +274,7 @@ def compute_advantage(
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
         data.batch["diversity"] = diversity_dict["diversity"]
-        data.batch["clipped_diversity"] = diversity_dict["clipped_diversity"]
+        data.batch["spreads"] = diversity_dict["spreads"]
     else:
         # handle all other adv estimator type other than GAE and GRPO
         adv_estimator_fn = core_algos.get_adv_estimator_fn(adv_estimator)

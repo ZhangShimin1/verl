@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 set -xeuo pipefail
 
-# export 
+# export
 WANDB_API_KEY=08a89b323e88ce77e62a3490c699f8907670def8
 # export VLLM_USE_V1=1
 
 adv_estimator=grpo
-diversity_reward_type='baseline'  # or reward_c_penalize_w
 diversity_reward_coef=1.0
 
-project_name='Qwen2.5-Math-1.5B'
-exp_name="qwen2.5-3b-${diversity_reward_type}"
+project_name='Qwen2.5-3B'
+exp_name="qwen2.5-3b-pgloss"
 
 use_kl_in_reward=False
 kl_coef=0.0
@@ -23,8 +22,8 @@ clip_cov_ratio=0.0002
 clip_cov_lb=1.0
 clip_cov_ub=5.0
 
-max_prompt_length=$((1024 * 1))
-max_response_length=$((1024 * 3))
+max_prompt_length=$((1024 * 2))
+max_response_length=$((1024 * 8))
 enable_overlong_buffer=False
 overlong_buffer_len=$((1024 * 2))
 overlong_penalty_factor=1.0
@@ -34,7 +33,7 @@ loss_mode="vanilla"
 enable_filter_groups=True
 filter_groups_metric=acc
 max_num_gen_batches=10
-train_prompt_bsz=32
+train_prompt_bsz=24
 gen_prompt_bsz=$((train_prompt_bsz * 3))
 train_prompt_mini_bsz=4
 n_resp_per_prompt=24
@@ -48,13 +47,14 @@ NNODES=${NNODES:-1}
 
 # Paths
 # dapo_math_17k_train=$HOME/data/dapo_math_17k/dapo-math-17k.parquet
-gsm8k_train=datasets/gsm8k_long_cot/train.parquet
-gsm8k_val=datasets/gsm8k_long_cot/test.parquet
-math500_val=datasets/math500_long_cot/test.parquet
-MODEL_PATH=${MODEL_PATH:-"$HOME/models/hfmodels/Qwen2.5-Math-1.5B"}
-CKPTS_DIR=${CKPTS_DIR:-"./checkpoints/${exp_name}"}
+gsm8k_train=$HOME/data/gsm8k/train.parquet
+gsm8k_val=$HOME/data/gsm8k/test.parquet
+math_val=$HOME/data/math/test.parquet
+RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
+MODEL_PATH=${MODEL_PATH:-"Qwen/Qwen2.5-3B"}
+CKPTS_DIR=${CKPTS_DIR:-"${HOME}/checkpoints/${exp_name}"}
 TRAIN_FILE="['$gsm8k_train']"
-TEST_FILE="['$gsm8k_val','$math500_val']"
+TEST_FILE="['$math_val']"
 
 # Algorithm
 temperature=1.0
@@ -98,7 +98,6 @@ HYDRA_FULL_ERROR=1 python -m recipe.entropy.main_entropy \
     algorithm.filter_groups.enable=${enable_filter_groups} \
     algorithm.filter_groups.metric=${filter_groups_metric} \
     algorithm.filter_groups.max_num_gen_batches=${max_num_gen_batches} \
-    algorithm.diversity_reward.type=${diversity_reward_type} \
     algorithm.diversity_reward.coef=${diversity_reward_coef} \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.use_dynamic_bsz=${use_dynamic_bsz} \
@@ -122,7 +121,7 @@ HYDRA_FULL_ERROR=1 python -m recipe.entropy.main_entropy \
     actor_rollout_ref.actor.ulysses_sequence_parallel_size=1 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.85 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size=${infer_micro_batch_size} \
-    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=4 \
     actor_rollout_ref.rollout.enable_chunked_prefill=True \
     actor_rollout_ref.rollout.max_num_batched_tokens=${max_token} \
     actor_rollout_ref.rollout.temperature=${temperature} \
@@ -144,12 +143,11 @@ HYDRA_FULL_ERROR=1 python -m recipe.entropy.main_entropy \
     trainer.logger='["console","wandb"]' \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \
-    trainer.n_gpus_per_node=8 \
+    trainer.n_gpus_per_node=4 \
     trainer.nnodes="${NNODES}" \
-    trainer.val_before_train=True \
+    trainer.val_before_train=False \
     trainer.test_freq=4 \
-    trainer.save_freq=32 \
-    trainer.max_actor_ckpt_to_keep=1 \
-    trainer.total_epochs=2 \
+    trainer.save_freq=50 \
+    trainer.total_epochs=1000 \
     trainer.default_local_dir="${CKPTS_DIR}" \
     trainer.resume_mode=auto  # auto
