@@ -466,7 +466,7 @@ class DataParallelPPOActor(BasePPOActor):
                     # diversity = torch.mean(torch.stack(spreads, dim=0))
                     # mean_adv = torch.mean(advantages.mean(dim=-1))
                     # div_loss = diversity * mean_adv
-                    div_loss = torch.mean(div_loss)
+                    div_loss = torch.mean(torch.stack(div_loss, dim=0))
 
 
                     loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
@@ -520,7 +520,8 @@ class DataParallelPPOActor(BasePPOActor):
                         loss = policy_loss * (response_mask.shape[0] / self.config.ppo_mini_batch_size)
                     else:
                         loss = policy_loss / self.gradient_accumulation
-                    loss = loss - div_loss * 0.0001
+                    # loss = loss - div_loss * 0.0001
+
                     loss.backward()
 
                     micro_batch_metrics.update(

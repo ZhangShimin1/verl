@@ -21,7 +21,8 @@ def residual_loss(dict_net, batch_state_traj):
     psi_y = dict_net(snapshots[1]).reshape(-1, dict_net.koopman_dim)
     psi_xT = psi_x.T
     # approximate K for a batch of state trajectories
-    G_inv = torch.linalg.pinv(torch.matmul(psi_xT, psi_x))
+    G = torch.matmul(psi_xT, psi_x) + 1e-6 * torch.eye(psi_xT.shape[0], device=psi_xT.device)
+    G_inv = torch.linalg.pinv(G)
     A = torch.matmul(psi_xT, psi_y)
     K = torch.matmul(G_inv, A)
 
@@ -42,11 +43,12 @@ def koopman_learning(hidden_states, koopman_dim):
     optimizer = torch.optim.Adam(learnable_dict.parameters(), lr=0.001)
 
     dataset = TensorDataset(hidden_states)
-    dataloader = DataLoader(dataset, batch_size=64, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=256, shuffle=True)
 
     # train the dictionary network via Residual DMD
     best_net, min_loss, losses = None, np.inf, []
-    for epoch in range(30):
+    for epoch in range(3):
+        print("***Koopman Learning Epoch:", epoch, "***")
         for idx, hs in enumerate(dataloader):
             optimizer.zero_grad()
             loss = residual_loss(learnable_dict, hs[0])
@@ -56,6 +58,7 @@ def koopman_learning(hidden_states, koopman_dim):
         if np.mean(losses) < min_loss:
             min_loss = np.mean(losses)
             best_net = learnable_dict
+        print("***Koopman Learning Loss:", loss, min_loss, "***")
     dict_matrix = best_net.dictionary.weight.detach()
     # Save the dict_matrix for later direct matrix multiplication
     torch.save(dict_matrix, "koopman_dict_matrix.pt")

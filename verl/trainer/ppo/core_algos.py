@@ -297,7 +297,6 @@ def compute_grpo_outcome_advantage(
         "diversity": scores.clone().detach(),
         "spreads": scores.clone().detach()
     }
-
     spreads = koopman_learning(dynamics, 50)
     for i in range(bsz):
         id2dynamics[index[i]].append(spreads[i])
