@@ -6,9 +6,10 @@ WANDB_API_KEY=08a89b323e88ce77e62a3490c699f8907670def8
 # export VLLM_USE_V1=1
 
 project_name='Qwen2.5-3B'
-exp_name='debug'
+exp_name='qwen2.5-3b-grpo'
 
 adv_estimator=grpo
+grpo_reward_type=baseline
 
 use_kl_in_reward=False
 kl_coef=0.0
@@ -28,14 +29,14 @@ overlong_buffer_len=$((1024 * 2))
 overlong_penalty_factor=1.0
 
 loss_agg_mode="token-mean"
-loss_mode="clip_cov"
+loss_mode="vanilla"
 enable_filter_groups=True
 filter_groups_metric=acc
 max_num_gen_batches=10
 train_prompt_bsz=24
 gen_prompt_bsz=$((train_prompt_bsz * 3))
 train_prompt_mini_bsz=4
-n_resp_per_prompt=4
+n_resp_per_prompt=24
 max_token=10240
 
 # Ray
@@ -45,13 +46,13 @@ RUNTIME_ENV=${RUNTIME_ENV:-"${WORKING_DIR}/verl/trainer/runtime_env.yaml"}
 NNODES=${NNODES:-1}
 
 # Paths
-dapo_math_17k_train=$HOME/data/dapo_math_17k/dapo-math-17k.parquet
+# dapo_math_17k_train=$HOME/data/dapo_math_17k/dapo-math-17k.parquet
 gsm8k_train=$HOME/data/gsm8k/train.parquet
-aime_val=$HOME/data/dapo_math_17k/aime-2024.parquet
+gsm8k_val=$HOME/data/gsm8k/test.parquet
 math_val=$HOME/data/math/test.parquet
 RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
 MODEL_PATH=${MODEL_PATH:-"Qwen/Qwen2.5-3B"}
-CKPTS_DIR=${CKPTS_DIR:-"${HOME}/checkpoints/debug"}
+CKPTS_DIR=${CKPTS_DIR:-"${HOME}/checkpoints/3b-grpo"}
 TRAIN_FILE="['$gsm8k_train']"
 TEST_FILE="['$math_val']"
 
@@ -97,6 +98,7 @@ HYDRA_FULL_ERROR=1 python -m recipe.entropy.main_entropy \
     algorithm.filter_groups.enable=${enable_filter_groups} \
     algorithm.filter_groups.metric=${filter_groups_metric} \
     algorithm.filter_groups.max_num_gen_batches=${max_num_gen_batches} \
+    algorithm.grpo_reward_type=${grpo_reward_type} \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.use_dynamic_bsz=${use_dynamic_bsz} \
     actor_rollout_ref.ref.log_prob_use_dynamic_bsz=${use_dynamic_bsz} \
@@ -138,7 +140,7 @@ HYDRA_FULL_ERROR=1 python -m recipe.entropy.main_entropy \
     reward_model.overlong_buffer.enable=${enable_overlong_buffer} \
     reward_model.overlong_buffer.len=${overlong_buffer_len} \
     reward_model.overlong_buffer.penalty_factor=${overlong_penalty_factor} \
-    trainer.logger='["console"]' \
+    trainer.logger='["console","wandb"]' \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \
     trainer.n_gpus_per_node=4 \
@@ -148,4 +150,4 @@ HYDRA_FULL_ERROR=1 python -m recipe.entropy.main_entropy \
     trainer.save_freq=32 \
     trainer.total_epochs=1000 \
     trainer.default_local_dir="${CKPTS_DIR}" \
-    trainer.resume_mode=disable  # auto
+    trainer.resume_mode=auto  # auto

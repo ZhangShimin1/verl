@@ -76,7 +76,7 @@ class DataParallelPPOActor(BasePPOActor):
             else entropy_from_logits
         )
         self.device_name = get_device_name()
- 
+
     def _forward_micro_batch(
         self, micro_batch, temperature, calculate_entropy=False, calculate_loss=False
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -164,6 +164,9 @@ class DataParallelPPOActor(BasePPOActor):
                     extra_args["temperature"] = temperature
                     extra_args["return_dict"] = True
 
+                # for p in self.actor_module.lm_head.parameters():
+                #     p.requires_grad = False
+
                 output = self.actor_module(
                     input_ids=input_ids_rmpad,
                     attention_mask=None,
@@ -250,6 +253,7 @@ class DataParallelPPOActor(BasePPOActor):
                 if calculate_entropy:
                     entropy = full_entropy.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
                     hidden_states = full_hidden_states.squeeze(-1)[:, -response_length - 1 : -1].float()  # (bsz, response_length, hid_dimension)
+                    # states = hidden_states[:, 0:512, :]
                     if calculate_loss:
                         states = hidden_states
                     else:
@@ -393,8 +397,7 @@ class DataParallelPPOActor(BasePPOActor):
             "attention_mask",
             "position_ids",
             "old_log_probs",
-            "advantages",
-            "spreads"
+            "advantages"
         ]
         if self.config.use_kl_loss:
             select_keys.append("ref_log_prob")
@@ -445,29 +448,43 @@ class DataParallelPPOActor(BasePPOActor):
                     if entropy_coeff != 0:
                         calculate_entropy = True
                     entropy, log_prob, hidden_states = self._forward_micro_batch(
-                        model_inputs, temperature=temperature, calculate_entropy=True
+                        model_inputs, temperature=temperature, calculate_entropy=True, calculate_loss=True
                     )
-
-                    koopman_dict_matrix = torch.load("koopman_dict_matrix.pt").to(hidden_states.device)
+                    exp_name = self.config.policy_loss.exp_name
+                    koopman_dict_matrix = torch.load(f"koop_dict_{exp_name}.pt").to(hidden_states.device)
                     div_loss = []
+                    spreads = []
                     traj_adv = advantages.mean(dim=-1)
                     for i, hs in enumerate(hidden_states):
-                        psi_x = torch.tanh(torch.matmul(hs[:-1], koopman_dict_matrix.t()))
-                        psi_y = torch.tanh(torch.matmul(hs[1:], koopman_dict_matrix.t()))
+                        psi_x = torch.sigmoid(torch.matmul(hs[:-1], koopman_dict_matrix.t()))
+                        psi_y = torch.sigmoid(torch.matmul(hs[1:], koopman_dict_matrix.t()))
                         psi_xT = psi_x.transpose(0, 1)  # [koopman_dim, seq_len-1]
-                        G = torch.matmul(psi_xT, psi_x)  # [koopman_dim, koopman_dim]
-                        G_inv = torch.linalg.pinv(G)
+                        G = torch.matmul(psi_xT, psi_x) + 1e-3 * torch.eye(psi_xT.shape[0], device=psi_xT.device)
                         A = torch.matmul(psi_xT, psi_y)
-                        K = torch.matmul(G_inv, A)  # [koopman_dim, koopman_dim]
+                        K = torch.linalg.solve(G, A)  # for numerical stability
+                        # G_inv = torch.linalg.pinv(G)
+                        # A = torch.matmul(psi_xT, psi_y)
+                        # K = torch.matmul(G_inv, A)  # [koopman_dim, koopman_dim]
                         _, S, _ = torch.linalg.svd(K, full_matrices=False)
-                        radius = torch.abs(S)
+                        radius = torch.sqrt(S**2 + 1e-3)
                         spread = torch.var(radius)
-                        div_loss.append(spread * traj_adv[i])
-                    # diversity = torch.mean(torch.stack(spreads, dim=0))
-                    # mean_adv = torch.mean(advantages.mean(dim=-1))
-                    # div_loss = diversity * mean_adv
-                    div_loss = torch.mean(div_loss)
+                        # only consider the div of positive adv
+                        spread_val = spread if traj_adv[i] > 0 else torch.tensor(0.0, device=spread.device)
+                        div_val = spread * traj_adv[i] if traj_adv[i] > 0 else torch.tensor(0.0, device=spread.device)
+                        spreads.append(spread_val)
+                        div_loss.append(div_val)
 
+                    spreads_tensor = torch.stack(spreads, dim=0)
+                    div_loss_tensor = torch.stack(div_loss, dim=0)
+                    # Detach the rollouts with uncontrollable diversity
+                    kl_penalized_indices = (spreads_tensor > 10.).nonzero(as_tuple=True)[0]
+                    div_loss_tensor = torch.where(
+                        spreads_tensor > 10.,
+                        div_loss_tensor.detach(),
+                        div_loss_tensor
+                    )
+                    div_loss = torch.mean(div_loss_tensor)
+                    spreads = torch.mean(spreads_tensor)
 
                     loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
 
@@ -520,16 +537,29 @@ class DataParallelPPOActor(BasePPOActor):
                         loss = policy_loss * (response_mask.shape[0] / self.config.ppo_mini_batch_size)
                     else:
                         loss = policy_loss / self.gradient_accumulation
-                    loss = loss - div_loss * 0.0001
+
+                    # apply kl penalty to the rollouts with uncontrollable diversity
+                    ref_log_prob = model_inputs["ref_log_prob"]
+                    kld = kl_penalty(
+                        logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty="kl"
+                    )
+                    kld = kld * response_mask
+                    kld = kld[kl_penalized_indices]
+                    kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+
+                    loss = loss - div_loss * self.config.policy_loss.div_coef + kl_loss * self.config.kl_loss_coef
+
                     loss.backward()
 
                     micro_batch_metrics.update(
                         {
                             "actor/pg_loss": pg_loss.detach().item(),
                             "actor/pg_clipfrac": pg_clipfrac.detach().item(),
+                            "actor/kl_loss": kl_loss.detach().item(),
                             "actor/ppo_kl": ppo_kl.detach().item(),
                             "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
                             "actor/div_loss": div_loss.detach().item(),
+                            "actor/diversity": spreads.detach().item(),
                         }
                     )
                     append_to_dict(metrics, micro_batch_metrics)

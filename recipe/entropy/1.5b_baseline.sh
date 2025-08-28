@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -xeuo pipefail
 
-# export 
+# export
 WANDB_API_KEY=08a89b323e88ce77e62a3490c699f8907670def8
 # export VLLM_USE_V1=1
 
@@ -9,8 +9,9 @@ adv_estimator=grpo
 diversity_reward_type='baseline'  # or reward_c_penalize_w
 diversity_reward_coef=1.0
 
-project_name='Qwen2.5-Math-1.5B'
-exp_name="${project_name}-${diversity_reward_type}"
+project_name='Qwen2.5-1.5B'
+exp_name='SimpleRL-1.5B'
+exp_name="${exp_name}-${diversity_reward_type}"
 
 use_kl_in_reward=False
 kl_coef=0.0
@@ -51,8 +52,8 @@ NNODES=${NNODES:-1}
 gsm8k_train=datasets/gsm8k_long_cot/train.parquet
 gsm8k_val=datasets/gsm8k_long_cot/test.parquet
 math500_val=datasets/math500_long_cot/test.parquet
-MODEL_PATH=${MODEL_PATH:-"$USE_YOUR_Qwen2_5_Math_1_5B_MODEL"}
-CKPTS_DIR=${CKPTS_DIR:-"./checkpoints/${exp_name}"}
+MODEL_PATH=${MODEL_PATH:-"hkust-nlp/Qwen-2.5-1.5B-SimpleRL-Zoo"}
+CKPTS_DIR=${CKPTS_DIR:-"${HOME}/checkpoints/${exp_name}"}
 TRAIN_FILE="['$gsm8k_train']"
 TEST_FILE="['$gsm8k_val','$math500_val']"
 
@@ -120,7 +121,7 @@ HYDRA_FULL_ERROR=1 python -m recipe.entropy.main_entropy \
     actor_rollout_ref.actor.grad_clip=1.0 \
     actor_rollout_ref.actor.loss_agg_mode=${loss_agg_mode} \
     actor_rollout_ref.actor.ulysses_sequence_parallel_size=1 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.85 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size=${infer_micro_batch_size} \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.enable_chunked_prefill=True \
@@ -144,12 +145,12 @@ HYDRA_FULL_ERROR=1 python -m recipe.entropy.main_entropy \
     trainer.logger='["console","wandb"]' \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \
-    trainer.n_gpus_per_node=8 \
+    trainer.n_gpus_per_node=6 \
     trainer.nnodes="${NNODES}" \
     trainer.val_before_train=True \
     trainer.test_freq=4 \
-    trainer.save_freq=32 \
+    trainer.save_freq=64 \
     trainer.max_actor_ckpt_to_keep=1 \
-    trainer.total_epochs=2 \
+    trainer.total_epochs=4 \
     trainer.default_local_dir="${CKPTS_DIR}" \
     trainer.resume_mode=auto  # auto

@@ -253,6 +253,8 @@ def compute_grpo_outcome_advantage(
     epsilon: float = 1e-6,
     norm_adv_by_std_in_grpo: bool = True,
     config: AlgoConfig = None,
+    step: Optional[int] = None,
+    exp_name: Optional[str] = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Compute advantage for GRPO, operating only on Outcome reward
@@ -289,25 +291,26 @@ def compute_grpo_outcome_advantage(
     id2mean = {}
     id2std = {}
 
-    id2dynamics = defaultdict(list)
-    id2mean_dynamics = {}
-    id2std_dynamics = {}
+    # id2dynamics = defaultdict(list)
+    # id2mean_dynamics = {}
+    # id2std_dynamics = {}
 
-    diversity_dict = {
-        "diversity": scores.clone().detach(),
-        "spreads": scores.clone().detach()
-    }
-
-    spreads = koopman_learning(dynamics, 50)
-    for i in range(bsz):
-        id2dynamics[index[i]].append(spreads[i])
-    for idx in id2dynamics:
-        rollouts_spreads = torch.stack(id2dynamics[idx])
-        id2mean_dynamics[idx] = torch.mean(rollouts_spreads).detach()
-        id2std_dynamics[idx] = torch.std(rollouts_spreads).detach()
-    for i in range(bsz):
-        spreads[i] = (spreads[i] - id2mean_dynamics[index[i]]) / (id2std_dynamics[index[i]] + epsilon)
-    diversity_dict["spreads"] = spreads  # torch.Size(bsz * n_rollouts)
+    # diversity_dict = {
+    #     "diversity": scores.clone().detach(),
+    #     "spreads": scores.clone().detach()
+    # }
+    if (step - 1) % 50 == 0:
+        koopman_learning(dynamics, 50, exp_name=exp_name)
+    # torch.save(dynamics.detach().cpu(), f"/home/smzhang/work25/datasets/3b-grpo/hidden_states_{step_index}.pt")
+    # for i in range(bsz):
+    #     id2dynamics[index[i]].append(spreads[i])
+    # for idx in id2dynamics:
+    #     rollouts_spreads = torch.stack(id2dynamics[idx])
+    #     id2mean_dynamics[idx] = torch.mean(rollouts_spreads).detach()
+    #     id2std_dynamics[idx] = torch.std(rollouts_spreads).detach()
+    # for i in range(bsz):
+    #     spreads[i] = (spreads[i] - id2mean_dynamics[index[i]]) / (id2std_dynamics[index[i]] + epsilon)
+    # diversity_dict["spreads"] = spreads  # torch.Size(bsz * n_rollouts)
 
     with torch.no_grad():
         for i in range(bsz):
@@ -327,12 +330,12 @@ def compute_grpo_outcome_advantage(
             else:
                 scores[i] = scores[i] - id2mean[index[i]]
 
-            diversity_dict["diversity"][i] = spreads[i]
+            # diversity_dict["diversity"][i] = spreads[i]
 
         scores = scores.unsqueeze(-1) * response_mask
-        diversity_dict["diversity"] = diversity_dict["diversity"].unsqueeze(-1) * response_mask
+        # diversity_dict["diversity"] = diversity_dict["diversity"].unsqueeze(-1) * response_mask
 
-    return scores, scores, diversity_dict
+    return scores, scores
 
 
 @register_adv_est(AdvantageEstimator.GRPO_PASSK)  # or simply: @register_adv_est("grpo_passk")

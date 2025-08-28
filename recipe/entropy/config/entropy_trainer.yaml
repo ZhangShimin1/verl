@@ -13,8 +13,8 @@ reward_model:
   reward_kwargs:
         overlong_buffer_cfg: ${reward_model.overlong_buffer}
   reward_manager: dapo
-  overlong_buffer: 
-    enable: False 
+  overlong_buffer:
+    enable: False
     len: 0
     penalty_factor: 0.0
     log: False
@@ -24,7 +24,7 @@ algorithm:
     enable: False # We try to avoid forgetting to set enable
     metric: null # acc / score / seq_reward / seq_final_reward / ...
     max_num_gen_batches: 0 # Non-positive values mean no upper limit
-  
+
   diversity_reward:
     type: baseline
     coef: 1.0
@@ -36,6 +36,8 @@ actor_rollout_ref:
   actor:
     policy_loss:
       loss_mode: "vanilla" # /clip-cov / kl-cov from https://arxiv.org/abs/2505.
+      div_coef: 1.0
+      exp_name: "baseline"
       clip_cov_ratio: 0.0002 # for clip-cov loss
       clip_cov_lb: 1.0 # for clip-cov loss
       clip_cov_ub: 5.0 # for clip-cov loss
