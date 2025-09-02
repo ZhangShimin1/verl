@@ -6,7 +6,7 @@ WANDB_API_KEY=08a89b323e88ce77e62a3490c699f8907670def8
 # export VLLM_USE_V1=1
 
 project_name='Qwen2.5-7B'
-exp_name='koop_adv'
+exp_name='koop_adv_mul'
 
 adv_estimator=grpo
 
