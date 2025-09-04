@@ -132,7 +132,7 @@ class RayEntropyTrainer(RayPPOTrainer):
                     output_responses = [self.tokenizer.decode(response_tokens[i], skip_special_tokens=True) for i in range(16)]
                     # INSERT_YOUR_CODE
                     # Write input prompt and 16 responses to a text file with a very distinguishable format
-                    with open("prompt_and_responses.txt", "a", encoding="utf-8") as f:
+                    with open(f"example_responses_{exp_name}.txt", "a", encoding="utf-8") as f:
                         f.write("\n" + "="*100 + "\n")
                         f.write(f"Step {step_count}):\n")
                         f.write("="*100 + "\n")
