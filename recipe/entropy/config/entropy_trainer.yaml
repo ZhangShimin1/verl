@@ -37,6 +37,7 @@ actor_rollout_ref:
     policy_loss:
       loss_mode: "vanilla" # /clip-cov / kl-cov from https://arxiv.org/abs/2505.
       div_coef: 1.0
+      div_th: 10.0
       exp_name: "baseline"
       clip_cov_ratio: 0.0002 # for clip-cov loss
       clip_cov_lb: 1.0 # for clip-cov loss

@@ -9,12 +9,12 @@ adv_estimator=grpo
 diversity_reward_coef=1.0
 
 project_name='Qwen2.5-3B'
-exp_name="div_0.05"
+exp_name="div-0.02"
 
 use_kl_in_reward=False
 kl_coef=0.0
 use_kl_loss=False
-kl_loss_coef=0.0
+kl_loss_coef=0.000
 
 clip_ratio_low=1
 clip_ratio_high=1
@@ -30,13 +30,14 @@ overlong_penalty_factor=1.0
 
 loss_agg_mode="token-mean"
 loss_mode="vanilla"
-div_coef=0.05
+div_coef=0.02
+div_th=0.5
 enable_filter_groups=True
 filter_groups_metric=acc
 max_num_gen_batches=10
 train_prompt_bsz=64
-gen_prompt_bsz=$((train_prompt_bsz * 3))
-train_prompt_mini_bsz=4
+gen_prompt_bsz=$((train_prompt_bsz * 4))
+train_prompt_mini_bsz=8
 n_resp_per_prompt=16
 max_token=10240
 
@@ -48,14 +49,20 @@ NNODES=${NNODES:-1}
 
 # Paths
 # dapo_math_17k_train=$HOME/data/dapo_math_17k/dapo-math-17k.parquet
-gsm8k_train=datasets/gsm8k_math_cot/train.parquet
-gsm8k_val=datasets/gsm8k_math_cot/test.parquet
-math500_val=datasets/math500_math_cot/test.parquet
+# gsm8k_train=datasets/gsm8k_math_cot/train.parquet
+# gsm8k_val=datasets/gsm8k_math_cot/test.parquet
+# math500_val_1=datasets/math500_math_cot/test.parquet
+div_math_22k_train=datasets/div_train/Div-MATH-22k/div-math-22k.parquet
+aime24_val=datasets/div_eval/filtered_aime_2024.parquet
+aime25_val=datasets/div_eval/filtered_aime_2025.parquet
+math500_val=datasets/div_eval/filtered_math500.parquet
+amc23_val=datasets/div_eval/filtered_amc2023.parquet
+
 RAY_DATA_HOME=${RAY_DATA_HOME:-"${HOME}/verl"}
 MODEL_PATH=${MODEL_PATH:-"Qwen/Qwen2.5-3B"}
 CKPTS_DIR=${CKPTS_DIR:-"${HOME}/checkpoints/${exp_name}"}
-TRAIN_FILE="['$gsm8k_train']"
-TEST_FILE="['$gsm8k_val','$math500_val']"
+TRAIN_FILE="['$div_math_22k_train']"
+TEST_FILE="['$aime24_val', '$aime25_val', '$math500_val', '$amc23_val']"
 
 # Algorithm
 temperature=1.0
@@ -133,7 +140,7 @@ HYDRA_FULL_ERROR=1 python -m recipe.entropy.main_entropy \
     actor_rollout_ref.rollout.val_kwargs.temperature=${temperature} \
     actor_rollout_ref.rollout.val_kwargs.top_p=${top_p} \
     actor_rollout_ref.rollout.val_kwargs.top_k=${top_k} \
-    actor_rollout_ref.rollout.val_kwargs.do_sample=False \
+    actor_rollout_ref.rollout.val_kwargs.do_sample=True \
     actor_rollout_ref.rollout.val_kwargs.n=1 \
     actor_rollout_ref.ref.log_prob_micro_batch_size=${infer_micro_batch_size} \
     actor_rollout_ref.ref.fsdp_config.param_offload=${offload} \
@@ -148,7 +155,7 @@ HYDRA_FULL_ERROR=1 python -m recipe.entropy.main_entropy \
     trainer.experiment_name="${exp_name}" \
     trainer.n_gpus_per_node=4 \
     trainer.nnodes="${NNODES}" \
-    trainer.val_before_train=False \
+    trainer.val_before_train=True \
     trainer.test_freq=4 \
     trainer.save_freq=32 \
     trainer.total_epochs=12 \

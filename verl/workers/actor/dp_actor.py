@@ -476,13 +476,13 @@ class DataParallelPPOActor(BasePPOActor):
 
                     spreads_tensor = torch.stack(spreads, dim=0)
                     div_loss_tensor = torch.stack(div_loss, dim=0)
-                    # Detach the rollouts with uncontrollable diversity
-                    kl_penalized_indices = (spreads_tensor > 10.).nonzero(as_tuple=True)[0]
-                    div_loss_tensor = torch.where(
-                        spreads_tensor > 10.,
-                        div_loss_tensor.detach(),
-                        div_loss_tensor
-                    )
+                    # # Detach the rollouts with uncontrollable diversity
+                    kl_penalized_mask = spreads_tensor > self.config.policy_loss.div_th
+                    # div_loss_tensor = torch.where(
+                    #     spreads_tensor > self.config.policy_loss.div_th,
+                    #     div_loss_tensor.detach(),
+                    #     div_loss_tensor
+                    # )
                     div_loss = torch.mean(div_loss_tensor)
                     spreads = torch.mean(spreads_tensor)
 
@@ -520,12 +520,17 @@ class DataParallelPPOActor(BasePPOActor):
                     else:
                         policy_loss = pg_loss
 
+                    policy_loss = policy_loss - div_loss * self.config.policy_loss.div_coef
+
                     if self.config.use_kl_loss:
                         ref_log_prob = model_inputs["ref_log_prob"]
                         # compute kl loss
                         kld = kl_penalty(
                             logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type
-                        )
+                        )  # (N, T)
+                        # kl_penalized_mask is (N,), need to broadcast to (N, T)
+                        kl_penalized_mask_broadcast = kl_penalized_mask.unsqueeze(-1).expand_as(kld)
+                        kld = kld * kl_penalized_mask_broadcast
                         kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
 
                         policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
@@ -537,25 +542,12 @@ class DataParallelPPOActor(BasePPOActor):
                         loss = policy_loss * (response_mask.shape[0] / self.config.ppo_mini_batch_size)
                     else:
                         loss = policy_loss / self.gradient_accumulation
-
-                    # apply kl penalty to the rollouts with uncontrollable diversity
-                    ref_log_prob = model_inputs["ref_log_prob"]
-                    kld = kl_penalty(
-                        logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty="kl"
-                    )
-                    kld = kld * response_mask
-                    kld = kld[kl_penalized_indices]
-                    kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
-
-                    loss = loss - div_loss * self.config.policy_loss.div_coef + kl_loss * self.config.kl_loss_coef
-
                     loss.backward()
 
                     micro_batch_metrics.update(
                         {
                             "actor/pg_loss": pg_loss.detach().item(),
                             "actor/pg_clipfrac": pg_clipfrac.detach().item(),
-                            "actor/kl_loss": kl_loss.detach().item(),
                             "actor/ppo_kl": ppo_kl.detach().item(),
                             "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
                             "actor/div_loss": div_loss.detach().item(),
