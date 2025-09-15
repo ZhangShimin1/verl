@@ -452,8 +452,8 @@ class DataParallelPPOActor(BasePPOActor):
                     )
                     exp_name = self.config.policy_loss.exp_name
                     koopman_dict_matrix = torch.load(f"koop_dict_{exp_name}.pt").to(hidden_states.device)
-                    div_loss = []
-                    spreads = []
+
+                    spreads, spectrums, diversity = [], [], []
                     traj_adv = advantages.mean(dim=-1)
                     for i, hs in enumerate(hidden_states):
                         psi_x = torch.sigmoid(torch.matmul(hs[:-1], koopman_dict_matrix.t()))
@@ -462,29 +462,31 @@ class DataParallelPPOActor(BasePPOActor):
                         G = torch.matmul(psi_xT, psi_x) + 1e-3 * torch.eye(psi_xT.shape[0], device=psi_xT.device)
                         A = torch.matmul(psi_xT, psi_y)
                         K = torch.linalg.solve(G, A)  # for numerical stability
-                        # G_inv = torch.linalg.pinv(G)
-                        # A = torch.matmul(psi_xT, psi_y)
-                        # K = torch.matmul(G_inv, A)  # [koopman_dim, koopman_dim]
                         _, S, _ = torch.linalg.svd(K, full_matrices=False)
                         radius = torch.sqrt(S**2 + 1e-3)
                         spread = torch.var(radius)
-                        # only consider the div of positive adv
-                        spread_val = spread if traj_adv[i] > 0 else torch.tensor(0.0, device=spread.device)
-                        div_val = spread * traj_adv[i] if traj_adv[i] > 0 else torch.tensor(0.0, device=spread.device)
-                        spreads.append(spread_val)
-                        div_loss.append(div_val)
+                        traj_adv_i = traj_adv[i] if traj_adv[i] > 0 else torch.tensor(0.0).to(hidden_states.device)
+                        if traj_adv_i > 0:
+                            spectrums.append(S)
+                        diversity.append(spread * traj_adv_i)
+                        spreads.append(spread if traj_adv_i > 0 else torch.tensor(0.0).to(hidden_states.device))
 
                     spreads_tensor = torch.stack(spreads, dim=0)
-                    div_loss_tensor = torch.stack(div_loss, dim=0)
-                    # # Detach the rollouts with uncontrollable diversity
+                    diversity_tensor = torch.stack(diversity, dim=0)
                     kl_penalized_mask = spreads_tensor > self.config.policy_loss.div_th
-                    # div_loss_tensor = torch.where(
-                    #     spreads_tensor > self.config.policy_loss.div_th,
-                    #     div_loss_tensor.detach(),
-                    #     div_loss_tensor
-                    # )
-                    div_loss = torch.mean(div_loss_tensor)
+                    diversity_tensor = torch.where(kl_penalized_mask, diversity_tensor.detach(), diversity_tensor)
+                    div_loss = torch.log(torch.mean(torch.exp(-diversity_tensor)))
                     spreads = torch.mean(spreads_tensor)
+
+                    if len(spectrums) > 1:
+                        spectrums_tensor = torch.stack(spectrums)
+                        spectrum_l2_dist = torch.cdist(spectrums_tensor, spectrums_tensor, p=2).triu(1).flatten()
+                        spectrum_l2_dist = spectrum_l2_dist[spectrum_l2_dist > 0] ** 2
+                        dist = torch.mean(spectrum_l2_dist)
+                        dist_loss = torch.log(torch.mean(torch.exp(-dist)))
+                    else:
+                        dist = torch.tensor(0.0).to(hidden_states.device)
+                        dist_loss = dist
 
                     loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
 
@@ -520,7 +522,7 @@ class DataParallelPPOActor(BasePPOActor):
                     else:
                         policy_loss = pg_loss
 
-                    policy_loss = policy_loss - div_loss * self.config.policy_loss.div_coef
+                    policy_loss = policy_loss + div_loss * self.config.policy_loss.div_coef
 
                     if self.config.use_kl_loss:
                         ref_log_prob = model_inputs["ref_log_prob"]
@@ -528,9 +530,11 @@ class DataParallelPPOActor(BasePPOActor):
                         kld = kl_penalty(
                             logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type
                         )  # (N, T)
-                        # kl_penalized_mask is (N,), need to broadcast to (N, T)
-                        kl_penalized_mask_broadcast = kl_penalized_mask.unsqueeze(-1).expand_as(kld)
-                        kld = kld * kl_penalized_mask_broadcast
+                        if self.config.policy_loss.div_coef != 0.:
+                            # kl_penalized_mask is (N,), need to broadcast to (N, T)
+                            kl_penalized_mask_broadcast = kl_penalized_mask.unsqueeze(-1).expand_as(kld)
+                            kld = kld * kl_penalized_mask_broadcast
+
                         kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
 
                         policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
@@ -550,8 +554,9 @@ class DataParallelPPOActor(BasePPOActor):
                             "actor/pg_clipfrac": pg_clipfrac.detach().item(),
                             "actor/ppo_kl": ppo_kl.detach().item(),
                             "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
-                            "actor/div_loss": div_loss.detach().item(),
-                            "actor/diversity": spreads.detach().item(),
+                            "actor/diversity_loss": div_loss.detach().item(),
+                            "actor/spectral_spread": spreads.detach().item(),
+                            "actor/spectral_dist": dist.detach().item(),
                         }
                     )
                     append_to_dict(metrics, micro_batch_metrics)

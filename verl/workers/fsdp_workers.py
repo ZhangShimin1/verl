@@ -73,7 +73,6 @@ from verl.utils.profiler import DistProfiler, DistProfilerExtension, log_gpu_mem
 from verl.utils.profiler.performance import reduce_timing
 from verl.utils.py_functional import convert_to_regular_types
 from verl.workers.sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
-from verl.workers.dynamics import koopman_learning
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))

@@ -23,10 +23,9 @@ def residual_loss(dict_net, batch_state_traj):
     psi_y = dict_net(snapshots[1]).reshape(-1, dict_net.koopman_dim)
     psi_xT = psi_x.T
     # approximate K for a batch of state trajectories
-    G = torch.matmul(psi_xT, psi_x) + 1e-6 * torch.eye(psi_xT.shape[0], device=psi_xT.device)
-    G_inv = torch.linalg.pinv(G)
+    G = torch.matmul(psi_xT, psi_x) + 1e-3 * torch.eye(psi_xT.shape[0], device=psi_xT.device)
     A = torch.matmul(psi_xT, psi_y)
-    K = torch.matmul(G_inv, A)
+    K = torch.linalg.solve(G, A)
 
     _, S, Vh = torch.linalg.svd(K)
     S_diag = torch.diag(S)
