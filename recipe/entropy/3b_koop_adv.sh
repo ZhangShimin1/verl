@@ -9,12 +9,12 @@ adv_estimator=grpo
 diversity_reward_coef=1.0
 
 project_name='Qwen2.5-3B'
-exp_name="div-0.02"
+exp_name="spectral-spread-0.1-kl-0.01"
 
 use_kl_in_reward=False
 kl_coef=0.0
-use_kl_loss=False
-kl_loss_coef=0.000
+use_kl_loss=True
+kl_loss_coef=0.01
 
 clip_ratio_low=1
 clip_ratio_high=1
@@ -30,8 +30,7 @@ overlong_penalty_factor=1.0
 
 loss_agg_mode="token-mean"
 loss_mode="vanilla"
-div_coef=0.02
-div_th=0.5
+div_coef=0.1
 enable_filter_groups=True
 filter_groups_metric=acc
 max_num_gen_batches=10
@@ -157,7 +156,7 @@ HYDRA_FULL_ERROR=1 python -m recipe.entropy.main_entropy \
     trainer.nnodes="${NNODES}" \
     trainer.val_before_train=True \
     trainer.test_freq=4 \
-    trainer.save_freq=32 \
+    trainer.save_freq=64 \
     trainer.total_epochs=12 \
     trainer.default_local_dir="${CKPTS_DIR}" \
     trainer.resume_mode=auto  # auto
