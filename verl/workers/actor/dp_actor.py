@@ -483,10 +483,8 @@ class DataParallelPPOActor(BasePPOActor):
                         spectrum_l2_dist = torch.cdist(spectrums_tensor, spectrums_tensor, p=2).triu(1).flatten()
                         spectrum_l2_dist = spectrum_l2_dist[spectrum_l2_dist > 0] ** 2
                         dist = torch.mean(spectrum_l2_dist)
-                        dist_loss = torch.log(torch.mean(torch.exp(-dist)))
                     else:
                         dist = torch.tensor(0.0).to(hidden_states.device)
-                        dist_loss = dist
 
                     loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
 

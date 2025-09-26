@@ -299,7 +299,7 @@ def compute_grpo_outcome_advantage(
     #     "diversity": scores.clone().detach(),
     #     "spreads": scores.clone().detach()
     # }
-    if (step - 1) % 16 == 0:
+    if (step - 1) % 50 == 0:
         koopman_learning(dynamics, 50, exp_name=exp_name)
     # torch.save(dynamics.detach().cpu(), f"/home/smzhang/work25/datasets/3b-grpo/hidden_states_{step_index}.pt")
     # for i in range(bsz):
